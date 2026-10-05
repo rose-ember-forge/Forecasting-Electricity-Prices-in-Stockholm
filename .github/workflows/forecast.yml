@@ -1,0 +1,37 @@
+name: daily forecast
+
+# Every morning before the noon auction: refresh the data, retrain, forecast the next
+# day and score earlier forecasts. Only the files in forecasts/ are committed.
+on:
+  schedule:
+    - cron: "30 7 * * *"  # 08:30 in winter, 09:30 in summer (Swedish time)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: data/raw/prices
+          key: prices-${{ github.run_id }}
+          restore-keys: prices-
+      - run: pip install -r requirements.txt
+      - run: python -m se3forecast.forecast
+        env:
+          PYTHONPATH: src
+      - name: Commit the forecast
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add forecasts/
+          git diff --cached --quiet || git commit -m "Forecast for $(tail -n 1 forecasts/latest.csv | cut -d, -f1)"
+          git push

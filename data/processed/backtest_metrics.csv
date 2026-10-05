@@ -1,0 +1,8 @@
+model,mae,rmse,bias,hours,rmae,coverage_raw,coverage
+Naive (yesterday / last week),29.031,40.271,0.828,8760,1.0,,
+Same hour last week,36.562,50.303,-0.636,8760,1.259,,
+"LEAR (Lasso, one model per hour)",17.538,25.015,-5.945,8760,0.604,,
+"LightGBM, prices + calendar",20.218,28.679,-3.356,8760,0.696,,
+"LightGBM, prices + calendar + weather",17.027,24.546,-3.594,8760,0.587,0.64,0.795
+Average of LEAR and LightGBM,16.345,23.677,-4.769,8760,0.563,,
+Average of LEAR and LightGBM (observed weather),16.616,24.214,-5.393,8760,0.572,,

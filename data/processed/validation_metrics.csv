@@ -1,0 +1,11 @@
+model,mae,rmse,bias,hours,rmae,coverage_raw,coverage
+Naive (yesterday / last week),26.354,42.387,0.167,8760,1.0,,
+"LEAR, 1-year window",16.63,28.441,-4.601,8760,0.631,,
+"LEAR, 2-year window",16.093,28.006,-3.951,8760,0.611,,
+"LEAR, all history",17.235,27.366,0.87,8760,0.654,,
+"LightGBM, 2-year window",17.255,28.917,-2.259,8760,0.655,,
+"LightGBM, all history",17.122,27.421,0.369,8760,0.65,,
+"LightGBM, no weather",20.275,31.189,2.43,8760,0.769,,
+"LightGBM, + all 96 hourly lags",16.783,27.368,-0.292,8760,0.637,0.625,0.789
+"LightGBM, raw prices (no asinh)",17.754,28.004,2.929,8760,0.674,,
+Average of LEAR (2 years) and LightGBM,15.878,26.664,-1.791,8760,0.602,,
