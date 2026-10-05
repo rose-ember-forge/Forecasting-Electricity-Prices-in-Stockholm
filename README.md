@@ -2,7 +2,7 @@
 
 **Day-ahead price forecasts for bidding zone SE3, backtested on a full year (October 2025 to September 2026) with only the information available before the noon auction.**
 
-The final model, an average of a Lasso regression (LEAR) and LightGBM, misses the hourly price by **16.3 EUR/MWh** on average (about 18 öre/kWh), **44% less than the naive forecast** used as the standard benchmark.
+The final model, an average of a Lasso regression (LEAR) and LightGBM, misses the hourly price by **16.3 EUR/MWh** on average (about 18 öre/kWh), **44% less than the naive forecast** used as the standard benchmark (95% confidence interval 39% to 48%).
 Prices averaged 67 EUR/MWh over the test year.
 A scheduled GitHub Action makes a fresh forecast every morning and scores it once the real prices are out.
 
@@ -10,11 +10,11 @@ A scheduled GitHub Action makes a fresh forecast every morning and scores it onc
 
 ## Key findings
 
-1. **Both model families beat the benchmark by about 40%; together they do better still.** LEAR (17.5 EUR/MWh) and LightGBM (17.0) make different mistakes, so their plain average (16.3) beats each of them. The same held on the validation year, which is where the choice was made.
+1. **Both model families beat the benchmark by about 40%; together they do better still.** LEAR (17.5 EUR/MWh) and LightGBM (17.0) make different mistakes, so their plain average (16.3) beats each of them. The same held on the validation year, which is where the choice was made. Diebold-Mariano tests confirm the average is significantly more accurate than LEAR, LightGBM and the baselines (all p < 0.001), while the gap between LEAR and LightGBM on their own is not significant (p = 0.08).
 2. **Weather forecasts are worth a lot.** LightGBM without weather has an error of 20.2 EUR/MWh; adding forecast wind and temperature brings it to 17.0. The change in wind from yesterday is the most useful weather input, because yesterday's price already reflects yesterday's wind.
-3. **Forecast weather beats perfect weather.** Feeding the model the weather that *actually* happened made it slightly worse (16.6 vs 16.3). Prices are set by bids, and the bidders only had the forecast too.
+3. **Forecast weather beats perfect weather.** Feeding the model the weather that *actually* happened made it slightly worse (16.6 vs 16.3, Diebold-Mariano p = 0.04). Prices are set by bids, and the bidders only had the forecast too. The difference is small, and it was one comparison among many, so I read it as "observed weather does not help" rather than as a strong effect.
 4. **Evening peaks are the hard part.** Errors are lowest at night (about 9 EUR/MWh) and highest between 17:00 and 20:00 (22 to 24). The most expensive 10% of hours are under-forecast by 33 EUR/MWh on average: spikes come from things the inputs do not see, such as a reactor outage or tight import capacity.
-5. **The intervals are honest.** Raw LightGBM quantiles gave an "80%" interval that held only 64% of the prices. After conformal calibration it holds 80%.
+5. **The intervals are honest and sharp.** Raw LightGBM quantiles gave an "80%" interval that held only 64% of the prices. After conformal calibration it holds 80%, and it is still about a third narrower than a naive interval that holds only 75%, with an interval score of 82 against the naive interval's 147.
 6. **Good enough to act on.** Charging an EV or running a heat pump in the three hours the forecast picks as cheapest costs 38 EUR/MWh on average, against 67 for the day as a whole and 34 for the three truly cheapest hours. The forecast captures 89% of the possible saving.
 
 ![Two winter weeks of forecasts](reports/figures/example_weeks.png)
@@ -28,6 +28,29 @@ A scheduled GitHub Action makes a fresh forecast every morning and scores it onc
 ![Price history by zone](reports/figures/price_history.png)
 
 </details>
+
+## Is the improvement real?
+
+A lower average error on one year could be luck. Three checks, all in [`evaluation.py`](src/se3forecast/evaluation.py):
+
+- **Diebold-Mariano tests** compare every pair of models on their daily errors (the mean absolute error over each day's 24 hours, as in [Lago et al., 2021](https://doi.org/10.1016/j.apenergy.2021.116983)), with the Harvey-Leybourne-Newbold small-sample correction. The test is paired: it asks whether one model is better *on the same days*, which is why the average can be significantly better than LightGBM even though their bootstrap intervals overlap.
+- **Block bootstrap confidence intervals** for each model's error and its improvement over naive. The bootstrap resamples whole weeks, so a run of hard winter days stays together.
+- **Proper scores for the intervals.** Pinball loss for the 10th and 90th percentiles and the Winkler interval score, which charges for width and heavily for misses. The baseline is the naive forecast plus the 10th and 90th percentiles of its own errors over the previous year, for that hour of the day.
+
+![Diebold-Mariano significance chessboard](reports/figures/significance.png)
+
+| Model | MAE (EUR/MWh) | 95% CI | Improvement over naive | 95% CI |
+|---|---:|---:|---:|---:|
+| Naive | 29.0 | 26.3 to 31.6 | | |
+| LEAR | 17.5 | 16.0 to 18.9 | 40% | 34% to 45% |
+| LightGBM | 17.0 | 15.4 to 18.4 | 41% | 37% to 46% |
+| **Average** | **16.3** | **14.8 to 17.7** | **44%** | **39% to 48%** |
+
+| 80% interval | Coverage | Mean width (EUR/MWh) | Pinball loss q10 / q90 | Interval score |
+|---|---:|---:|---:|---:|
+| Naive + its past errors | 75% | 83 | 7.4 / 7.3 | 147 |
+| LightGBM quantiles, raw | 64% | 41 | 3.7 / 5.0 | 87 |
+| **LightGBM quantiles, conformal** | **80%** | **54** | **3.6 / 4.5** | **82** |
 
 ## The setup: no peeking at tomorrow
 
@@ -81,7 +104,8 @@ Open-Meteo archive ─┘    raw files        hourly table             day-ahead
 2. **Build an hourly table in SQL** ([`sql/`](sql), [`build.py`](src/se3forecast/build.py)). DuckDB converts UTC timestamps to Swedish local time, averages the 15-minute prices introduced on 1 October 2025 to hours, averages the repeated hour on the autumn daylight-saving day and fills the missing spring hour.
 3. **Features** ([`features.py`](src/se3forecast/features.py)). Prices of the same hour 1, 2, 3 and 7 days back, the 7-day mean and spread of that hour, yesterday's mean, minimum, maximum and last hour, yesterday's prices in SE1, SE2 and SE4 and the spreads between zones, the full 24-hour profile of earlier days, weather for the target day and its change from yesterday, and calendar features including Swedish public holidays and the eves when most workplaces close (Midsummer, Christmas and New Year's Eve).
 4. **Backtest** ([`backtest.py`](src/se3forecast/backtest.py), [`models.py`](src/se3forecast/models.py)). Rolling origin with monthly retraining; metrics are MAE, RMSE, bias and MAE relative to the naive benchmark (rMAE).
-5. **Analyse** in [`notebooks/analysis.ipynb`](notebooks/analysis.ipynb), which reads only the small processed files.
+5. **Evaluate** ([`evaluation.py`](src/se3forecast/evaluation.py)). Diebold-Mariano tests, block bootstrap confidence intervals and interval scores.
+6. **Analyse** in [`notebooks/analysis.ipynb`](notebooks/analysis.ipynb), which reads only the small processed files.
 
 ## Limitations
 
@@ -109,6 +133,7 @@ python -m se3forecast.ingest           # prices, weather observations and archiv
 python -m se3forecast.build            # hourly table via DuckDB
 python -m se3forecast.backtest --validation   # model choices, about 4 minutes
 python -m se3forecast.backtest         # test year, about 4 minutes
+python -m se3forecast.evaluation       # significance tests and interval scores
 python -m se3forecast.figures          # redraw the charts
 pytest
 ```
@@ -118,18 +143,18 @@ pytest
 ```
 ├── .github/workflows/        tests, and the daily forecast
 ├── app/streamlit_app.py      interactive dashboard
-├── data/processed/           hourly table, backtest predictions and metrics
+├── data/processed/           hourly table, backtest predictions, metrics and significance tests
 ├── forecasts/                live forecasts and their scores
 ├── notebooks/analysis.ipynb  walkthrough of the analysis
 ├── reports/figures/          charts used in this README
 ├── sql/                      DuckDB queries for the hourly table
-├── src/se3forecast/          ingest, build, features, models, backtest, figures, forecast
-└── tests/                    leakage, feature, model and dashboard tests
+├── src/se3forecast/          ingest, build, features, models, backtest, evaluation, figures, forecast
+└── tests/                    leakage, feature, model, evaluation and dashboard tests
 ```
 
 ## Sammanfattning på svenska
 
-Projektet prognostiserar morgondagens timpriser på el i elområde SE3 (Stockholm) innan Nord Pools auktion stänger klockan 12. Det bygger på öppna data: spotpriser från elprisetjustnu.se, väderobservationer från SMHI och arkiverade väderprognoser från Open-Meteo. Ett medelvärde av en Lasso-modell (LEAR) och LightGBM missar timpriset med i genomsnitt 16,3 EUR/MWh (cirka 18 öre/kWh) under teståret oktober 2025 till september 2026, vilket är 44 % bättre än en naiv prognos. Vindprognoser förbättrar träffsäkerheten tydligt, och kvällstopparna är svårast att förutse. En schemalagd GitHub Action gör en ny prognos varje morgon.
+Projektet prognostiserar morgondagens timpriser på el i elområde SE3 (Stockholm) innan Nord Pools auktion stänger klockan 12. Det bygger på öppna data: spotpriser från elprisetjustnu.se, väderobservationer från SMHI och arkiverade väderprognoser från Open-Meteo. Ett medelvärde av en Lasso-modell (LEAR) och LightGBM missar timpriset med i genomsnitt 16,3 EUR/MWh (cirka 18 öre/kWh) under teståret oktober 2025 till september 2026, vilket är 44 % bättre än en naiv prognos (95 % konfidensintervall 39–48 %, statistiskt säkerställt med Diebold-Mariano-test). Vindprognoser förbättrar träffsäkerheten tydligt, och kvällstopparna är svårast att förutse. En schemalagd GitHub Action gör en ny prognos varje morgon.
 
 ## Data and licence
 

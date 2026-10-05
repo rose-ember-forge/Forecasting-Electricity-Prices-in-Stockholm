@@ -1,0 +1,8 @@
+model,mae,mae_low,mae_high,improvement,improvement_low,improvement_high
+Naive (yesterday / last week),29.031,26.304,31.631,-0.0,0.0,0.0
+Same hour last week,36.562,33.057,40.039,-0.259,-0.357,-0.171
+"LEAR (Lasso, one model per hour)",17.538,16.042,18.901,0.396,0.345,0.446
+"LightGBM, prices + calendar",20.218,18.481,21.781,0.304,0.254,0.349
+"LightGBM, prices + calendar + weather",17.027,15.439,18.423,0.413,0.368,0.461
+Average of LEAR and LightGBM,16.345,14.847,17.672,0.437,0.393,0.482
+Average of LEAR and LightGBM (observed weather),16.616,15.12,18.047,0.428,0.383,0.475

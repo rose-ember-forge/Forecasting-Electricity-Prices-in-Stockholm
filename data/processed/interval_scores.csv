@@ -1,0 +1,4 @@
+,coverage,mean_width,pinball_q10,pinball_q90,interval_score
+Naive + past errors (historical simulation),0.75,82.998,7.35,7.338,146.88
+"LightGBM quantiles, raw",0.64,41.136,3.697,4.956,86.527
+"LightGBM quantiles, conformal",0.795,54.285,3.644,4.536,81.797

@@ -76,28 +76,81 @@ def predictions() -> pd.DataFrame:
 def model_comparison() -> None:
     m = pd.read_csv(PROCESSED / "backtest_metrics.csv", index_col="model")
     m = m.drop(index=[i for i in m.index if "observed weather" in i]).sort_values("mae", ascending=False)
-    fig, ax = plt.subplots(figsize=(9, 4.6))
-    fig.subplots_adjust(top=0.8, bottom=0.12, left=0.33, right=0.95)
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    fig.subplots_adjust(top=0.8, bottom=0.17, left=0.33, right=0.95)
     colors = [SERIES[0] if name == FINAL else NEUTRAL_BAR for name in m.index]
     ax.barh(range(len(m)), m["mae"], color=colors, height=0.62, edgecolor=SURFACE, linewidth=2)
+    ci = pd.read_csv(PROCESSED / "bootstrap_ci.csv", index_col="model").reindex(m.index)
+    ax.hlines(range(len(m)), ci["mae_low"], ci["mae_high"], color=INK_2, lw=1.2)
     for y, (name, row) in enumerate(m.iterrows()):
         change = 1 - row["rmae"]
         label = f"{row['mae']:.1f}"
         if name != Naive.name:
             label += f"   ({abs(change):.0%} {'lower' if change > 0 else 'higher'} than naive)"
-        ax.text(row["mae"] + 0.4, y, label, va="center", fontsize=9, color=INK if name == FINAL else INK_2,
+        ax.text(ci.loc[name, "mae_high"] + 0.5, y, label, va="center", fontsize=9, color=INK if name == FINAL else INK_2,
                 fontweight="bold" if name == FINAL else "normal")
     ax.set_yticks(range(len(m)))
     ax.set_yticklabels(m.index)
     ax.tick_params(axis="y", length=0)
     ax.grid(axis="y", visible=False)
     ax.grid(axis="x", color=GRID, lw=0.6)
-    ax.set_xlim(0, m["mae"].max() * 1.45)
+    ax.set_xlim(0, ci["mae_high"].max() * 1.4)
     ax.set_xlabel("Mean absolute error, EUR/MWh (lower is better)")
     _title(fig, "Averaging a Lasso model and LightGBM cuts the error by 44%",
            "Day-ahead forecasts of every hour from October 2025 to September 2026, retrained monthly")
-    _source(fig)
+    _source(fig, "Whiskers: 95% block bootstrap interval.")
     _save(fig, "model_comparison")
+
+
+SHORT_NAMES = {
+    "Naive (yesterday / last week)": "Naive",
+    "Same hour last week": "Last week",
+    "LEAR (Lasso, one model per hour)": "LEAR",
+    "LightGBM, prices + calendar": "LightGBM,\nno weather",
+    "LightGBM, prices + calendar + weather": "LightGBM",
+    FINAL: "Average",
+}
+
+
+def significance() -> None:
+    """Diebold-Mariano chessboard: is the row model significantly more accurate than the column?"""
+    p = pd.read_csv(PROCESSED / "dm_pvalues.csv", index_col="model")
+    keep = [m for m in SHORT_NAMES if m in p.index]
+    p = p.loc[keep, keep]
+    bins = [(0.001, "#0d3b73", "< 0.001"), (0.01, "#2a78d6", "< 0.01"), (0.05, "#8fb8ea", "< 0.05"), (1.01, "#ecebe6", "not significant")]
+    fig, ax = plt.subplots(figsize=(8.4, 6.4))
+    fig.subplots_adjust(top=0.82, bottom=0.22, left=0.2, right=0.97)
+    for i, row in enumerate(keep):
+        for j, col in enumerate(keep):
+            if i == j:
+                ax.add_patch(plt.Rectangle((j, i), 1, 1, color=SURFACE))
+                continue
+            v = p.loc[row, col]
+            color = next(c for limit, c, _ in bins if v < limit)
+            ax.add_patch(plt.Rectangle((j + 0.03, i + 0.03), 0.94, 0.94, color=color, lw=0))
+            if v < 0.05 or v < 0.2:
+                text = "<0.001" if v < 0.001 else f"{v:.3f}"
+                ax.text(j + 0.5, i + 0.5, text, ha="center", va="center", fontsize=8.5,
+                        color="white" if v < 0.01 else INK)
+    ax.set_xlim(0, len(keep))
+    ax.set_ylim(len(keep), 0)
+    ax.set_xticks(np.arange(len(keep)) + 0.5)
+    ax.set_xticklabels([SHORT_NAMES[k] for k in keep])
+    ax.set_yticks(np.arange(len(keep)) + 0.5)
+    ax.set_yticklabels([SHORT_NAMES[k] for k in keep])
+    ax.tick_params(length=0)
+    ax.grid(False)
+    for side in ["left", "bottom"]:
+        ax.spines[side].set_visible(False)
+    ax.set_xlabel("... is more accurate than this model", labelpad=8)
+    ax.set_ylabel("This model ...", labelpad=8)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for _, c, _ in bins]
+    ax.legend(handles, [f"p {lab}" if lab != "not significant" else lab for _, _, lab in bins], loc="upper left",
+              bbox_to_anchor=(0, -0.2), ncols=4, fontsize=9, handlelength=1.2)
+    _title(fig, "The average is significantly better than every other model",
+           "One-sided Diebold-Mariano tests on the daily mean absolute error, test year (365 days)")
+    _source(fig)
+    _save(fig, "significance")
 
 
 def example_weeks() -> None:
@@ -256,6 +309,7 @@ def feature_importance(top: int = 15) -> pd.Series:
 def main() -> None:
     price_history()
     model_comparison()
+    significance()
     example_weeks()
     error_by_hour()
     error_by_month()
